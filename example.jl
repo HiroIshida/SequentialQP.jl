@@ -2,6 +2,8 @@ using Revise
 using SparseArrays
 using LinearAlgebra
 using OSQP
+using SequentialQP
+using BlockArrays
 
 function objective_function(x)
     diag_mat = Diagonal([1., 1.])
@@ -12,39 +14,56 @@ end
 
 function equality_constraint(x)
     func = (x[1] - 1)^2 + 1 - x[2]
-    jac = reshape([2 * x[1], -1], :, 1)
+    jac = reshape([2 * (x[1] - 1.0), -1], :, 1)
     return func, jac
 end
 
-lambda = [0.0]
-x = [3.0, 3.0]
 
-model = OSQP.Model()
-for i in 1:100
-    lag(x) = lagrangian(x, lambda, objective_function, equality_constraint)
-    lagval, lagjac = lag(x)
-    H = hessian_finite_difference(lag, x)
+function example()
 
-    P = SparseMatrixCSC(H)
-    q = lagjac
+    n_objective = 2
+    n_eq = 1
 
-    hval, hjac = equality_constraint(x)
-    A = SparseMatrixCSC(transpose(hjac))
-    q = x
-    l = [-hval]
-    u = l
-    println(size(P))
-    println(size(A))
-    println(q)
-    println(l)
-    OSQP.setup!(model; P=P, q=q, A=A, l=l, u=u)
-    results = OSQP.solve!(model)
-    x = results.x
+    lambda = [0] # somehow lambda must be 0 here
+    x = [1.466666, -1.133333]
+    
+    z = vcat(x, lambda)
 
-    objective_function(x)
+    options = Dict(:verbose => false)
+    block_array = BlockArray{Float64}(undef_blocks, [2, 1], [2, 1])
+    block_array[Block(2, 2)] = zeros(1, 1) # is static
 
-    println(results.x)
+    for i in 1:200
+        model = OSQP.Model()
+        lag_x(x) = SequentialQP.lagrangian(x, lambda, objective_function, equality_constraint)
+        W = SequentialQP.hessian_finite_difference(lag_x, x)
+        c, A = equality_constraint(x)
+        f, df = objective_function(x)
+        # Now, make a quadratic subproblem
+        # 1/2 p^T W p + ∇ f^T p 
+        # s.t. Ak * p + c = 0
+
+        P = SparseMatrixCSC(W)
+        q = vec(df)
+        Asp = SparseMatrixCSC(transpose(A))
+        l = [-c]
+        u = [-c]
+        OSQP.setup!(model; P=P, q=q, A=Asp, l=l, u=u, options...)
+        results = OSQP.solve!(model)
+
+        # the KKT optimality condition
+        println(W * results.x + df + A * results.y)
+        println(dot(A, results.x) + c)
+
+        x += results.x # p in Wright's book
+        lambda = -results.y # thd dual
+        println(x)
+        println(lambda)
+    end
+
+    return x
 end
 
+x = example()
 
 

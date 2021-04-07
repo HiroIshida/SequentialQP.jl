@@ -8,8 +8,9 @@ function lagrangian(x, lambda, f, h)
     fval, fjac = f(x)
     hval, hjac = h(x)
     lag_val = fval .- dot(lambda, hval)
-    lag_jac = fjac .- sum(broadcast(*, reshape(lambda, 1, :), hjac), dims=2)
-    return lag_val, lag_jac
+    lag_jac_x = fjac .- sum(broadcast(*, reshape(lambda, 1, :), hjac), dims=2)
+    lag_jac_lam = -hval
+    return lag_val, lag_jac_x
 end
 
 function hessian_finite_difference(lag, x0)
