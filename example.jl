@@ -3,7 +3,6 @@ using SparseArrays
 using LinearAlgebra
 using OSQP
 using SequentialQP
-using BlockArrays
 
 function objective_function(x)
     diag_mat = Diagonal([1., 1.])
@@ -30,8 +29,6 @@ function example()
     z = vcat(x, lambda)
 
     options = Dict(:verbose => false)
-    block_array = BlockArray{Float64}(undef_blocks, [2, 1], [2, 1])
-    block_array[Block(2, 2)] = zeros(1, 1) # is static
 
     for i in 1:200
         model = OSQP.Model()
@@ -56,7 +53,7 @@ function example()
         println(dot(A, results.x) + c)
 
         x += results.x # p in Wright's book
-        lambda = -results.y # thd dual
+        lambda = results.y # thd dual
         println(x)
         println(lambda)
     end

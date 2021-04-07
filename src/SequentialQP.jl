@@ -7,9 +7,8 @@ using OSQP
 function lagrangian(x, lambda, f, h)
     fval, fjac = f(x)
     hval, hjac = h(x)
-    lag_val = fval .- dot(lambda, hval)
-    lag_jac_x = fjac .- sum(broadcast(*, reshape(lambda, 1, :), hjac), dims=2)
-    lag_jac_lam = -hval
+    lag_val = fval .+ dot(lambda, hval)
+    lag_jac_x = fjac .+ sum(broadcast(*, reshape(lambda, 1, :), hjac), dims=2)
     return lag_val, lag_jac_x
 end
 
