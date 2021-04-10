@@ -30,4 +30,4 @@ lambda = [0]
 mu = [0]
 x = [20, 20.0]
     
-@btime SequentialQP.optimize(x, lambda, mu, objective_function, inequality_constraint, equality_constraint)
+SequentialQP.optimize(x, lambda, mu, objective_function, inequality_constraint, equality_constraint)

@@ -4,32 +4,6 @@ using SparseArrays
 using LinearAlgebra
 using OSQP
 
-function lagrangian(x, lambda, mu, f, g, h)
-    fval, fjac = f(x)
-    gval, gjac = g(x)
-    hval, hjac = h(x)
-    lag_val = fval .+ dot(lambda, gval) .+ dot(mu, hval)
-
-    gterm = sum(broadcast(*, reshape(lambda, 1, :), gjac), dims=2)
-    hterm = sum(broadcast(*, reshape(mu, 1, :), hjac), dims=2)
-    lag_jac_x = fjac .+ gterm .+ hterm
-    return lag_val, lag_jac_x
-end
-
-function hessian_finite_difference(lag, x0)
-    eps = 1e-7
-    dim = length(x0)
-    hess = zeros(dim, dim)
-    _, jac0 = lag(x0)
-    for i in 1:dim
-        x1 = copy(x0)
-        x1[i] += eps
-        _, jac1 = lag(x1)
-        hess[i, :] = (jac1 - jac0)/eps
-    end
-    return hess
-end
-
 mutable struct SubProblem
     n_dec::Int
     n_eq::Int
@@ -49,10 +23,7 @@ function SubProblem(n_dec::Int, n_eq::Int, n_ineq::Int)
     SubProblem(n_dec, n_eq, n_ineq, A, l, u)
 end
 
-function set_subproblem_constraint!(problem::SubProblem, g, h, x)
-    c_ineq, A_ineq = g(x)
-    c_eq, A_eq = h(x)
-
+function set_subproblem_constraint!(problem::SubProblem, c_ineq, c_eq, A_ineq, A_eq)
     problem.l[1:problem.n_ineq] = -c_ineq
     # upper side of ineq is already set to Inf
     problem.l[problem.n_ineq+1:end] = -c_eq
@@ -62,7 +33,7 @@ function set_subproblem_constraint!(problem::SubProblem, g, h, x)
     problem.A[problem.n_ineq+1:end, :] = transpose(A_eq)
 end
 
-function optimize(x, lambda, mu, objective_function, inequality_constraint, equality_constraint; use_bfgs=true, ftol=1e-4)
+function optimize(x, lambda, mu, objective_function, inequality_constraint, equality_constraint; ftol=1e-4)
     n_dec = length(x)
     n_ineq = length(lambda)
     n_eq = length(mu)
@@ -73,14 +44,24 @@ function optimize(x, lambda, mu, objective_function, inequality_constraint, equa
 
     W = Matrix(1.0I, n_dec, n_dec)
     x_pre = zeros(n_dec)
+    fval_pre = Inf
+    fgrad_pre = Inf
+    gval_pre = Inf
+    gjac_pre = Inf
+    hval_pre = Inf
+    hjac_pre = Inf
 
-    for i in 1:10
-        lag_x(x) = SequentialQP.lagrangian(x, lambda, mu, objective_function, inequality_constraint, equality_constraint)
-        _, lag_grad = lag_x(x)
-        _, lag_grad_pre = lag_x(x_pre) # TODO 
+    counter = 0
+    for i in 1:5
+        println(lambda, mu)
+        fval, fgrad = objective_function(x)
+        gval, gjac = inequality_constraint(x)
+        hval, hjac = equality_constraint(x)
+        lag_grad = fgrad .+ sum(broadcast(*, reshape(lambda, 1, :), gjac), dims=2) + sum(broadcast(*, reshape(mu, 1, :), hjac), dims=2)
 
         # damped BFGS update
-        if use_bfgs
+        if counter > 0
+            lag_grad_pre = fgrad_pre .+ sum(broadcast(*, reshape(lambda, 1, :), gjac_pre), dims=2) + sum(broadcast(*, reshape(mu, 1, :), hjac_pre), dims=2)
             s = x - x_pre
             y = lag_grad - lag_grad_pre
             sWs = transpose(s) * W * s
@@ -89,30 +70,30 @@ function optimize(x, lambda, mu, objective_function, inequality_constraint, equa
             theta = (isPositive ? 0.8 * sWs / (sWs - sy) : 1.0)
             r = theta * y + (1 - theta) * W * s
             W = W - (W*s*transpose(s)*W)/sWs + r*transpose(r)/dot(s, r)
-        else
-            W = SequentialQP.hessian_finite_difference(lag_x, x)
         end
 
-        c_ineq, A_ineq = inequality_constraint(x)
-        c_eq, A_eq = equality_constraint(x)
-        f, df = objective_function(x)
         # Now, make a quadratic subproblem
         # 1/2 p^T W p + ∇ f^T p 
         # s.t. Ak * p + c = 0
-
-        set_subproblem_constraint!(problem, inequality_constraint, equality_constraint, x)
+        set_subproblem_constraint!(problem, gval, hval, gjac, hjac)
         P = SparseMatrixCSC(W)
-        q = vec(df)
+        q = vec(fgrad)
         Asp = SparseMatrixCSC(problem.A)
 
 
         OSQP.setup!(model; P=P, q=q, A=Asp, l=problem.l, u=problem.u, options...)
         results = OSQP.solve!(model)
 
+        # update 
         x_pre = x
+        fgrad_pre = fgrad
+        gjac_pre = gjac
+        hjac_pre = hjac
+
         x += results.x # p in Wright's book
         lambda = [results.y[1]] # dual for ineq
         mu = [results.y[2]] # dual for eq
+        counter += 1
     end
     return x, problem
 end
