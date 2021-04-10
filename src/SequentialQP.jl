@@ -45,15 +45,14 @@ function optimize(x, lambda, mu, objective_function, inequality_constraint, equa
     W = Matrix(1.0I, n_dec, n_dec)
     x_pre = zeros(n_dec)
     fval_pre = Inf
-    fgrad_pre = Inf
     gval_pre = Inf
-    gjac_pre = Inf
     hval_pre = Inf
-    hjac_pre = Inf
+    fgrad_pre::Vector{Float64} = zeros(n_dec)
+    gjac_pre::Array{Float64, 2} = zeros(n_ineq, n_dec)
+    hjac_pre::Array{Float64, 2} = zeros(n_eq, n_dec)
 
     counter = 0
-    for i in 1:5
-        println(lambda, mu)
+    for i in 1:10
         fval, fgrad = objective_function(x)
         gval, gjac = inequality_constraint(x)
         hval, hjac = equality_constraint(x)
