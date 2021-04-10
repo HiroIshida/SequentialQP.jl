@@ -121,7 +121,7 @@ function example()
 
     lambda = [0] # somehow lambda must be 0 here
     mu = [0]
-    x = [1.466666, -1.133333]
+    x = [20, 20.0]
     
     z = vcat(x, lambda)
 
@@ -132,9 +132,31 @@ function example()
     n_ineq = 1
     problem = SubProblem(n_dec, n_eq, n_ineq)
 
+    W = Matrix(1.0I, n_dec, n_dec)
+    x_pre = zeros(n_dec)
+
+    use_bfgs = true
+
     for i in 1:10
         lag_x(x) = SequentialQP.lagrangian(x, lambda, mu, objective_function, inequality_constraint, equality_constraint)
-        W = SequentialQP.hessian_finite_difference(lag_x, x)
+        _, lag_grad = lag_x(x)
+        _, lag_grad_pre = lag_x(x_pre) # TODO 
+
+        # damped BFGS update
+        if use_bfgs
+            s = x - x_pre
+            x_pre = x
+            y = lag_grad - lag_grad_pre
+            sWs = transpose(s) * W * s
+            sy = dot(s, y)
+            isPositive = (sy - 0.2 * sWs < 0)
+            theta = (isPositive ? 0.8 * sWs / (sWs - sy) : 1.0)
+            r = theta * y + (1 - theta) * W * s
+            W = W - (W*s*transpose(s)*W)/sWs + r*transpose(r)/dot(s, r)
+        else
+            W = SequentialQP.hessian_finite_difference(lag_x, x)
+        end
+
         c_ineq, A_ineq = inequality_constraint(x)
         c_eq, A_eq = equality_constraint(x)
         f, df = objective_function(x)
@@ -154,6 +176,7 @@ function example()
         x += results.x # p in Wright's book
         lambda = [results.y[1]] # dual for ineq
         mu = [results.y[2]] # dual for eq
+        println(x)
     end
 
     return x, problem
