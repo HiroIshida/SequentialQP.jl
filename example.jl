@@ -5,6 +5,17 @@ using OSQP
 using SequentialQP
 using Revise
 
+struct QuadraticForm
+    P::Array{Float64, 2}
+end
+hessian(qf::QuadraticForm) = P
+
+function (qf::QuadraticForm)(x) 
+    val = 0.5 * transpose(x) * qf.M * x
+    grad = qf.M * x
+    return val, grad
+end
+
 function objective_function(x)
     diag_mat = Diagonal([1., 1.])
     val = 0.5 * transpose(x) * diag_mat * x
@@ -24,10 +35,59 @@ function inequality_constraint(x)
     return func, jac
 end
 
+mutable struct EvaluationCache
+    fval::Union{Float64, Nothing}
+    fgrad::Union{Vector{Float64}, Nothing}
+    gval::Union{Vector{Float64}, Nothing}
+    gjac::Union{Array{Float64, 2}, Nothing}
+    hval::Union{Vector{Float64}, Nothing}
+    hjac::Union{Array{Float64, 2}, Nothing}
+end
+EvaluationCache() = EvaluationCache(nothing, nothing, nothing, nothing, nothing, nothing)
+
+function clear_cache!(eval_cache::EvaluationCache) 
+    for field_name in fieldname(EvaluationCache)
+        setfield!(eval_cache, field_name, nothing)
+    end
+end
+
+mutable struct SQPWorkspace
+    n_dec::Int
+    n_ineq::Int
+    n_eq::Int
+
+    lambda::Vector{Float64} # ineq dual
+    mu::Vector{Float64} # eq dual
+    eval_cache::EvaluationCache
+end
+
+function SQPWorkspace(n_dec::Int, n_ineq::Int, n_eq::Int)
+    lambda = zeros(n_ineq)
+    mu = zeros(n_eq)
+    SQPWorkspace(n_dec, n_ineq, n_eq, lambda, mu, EvaluationCache())
+end
+
+function create_subploblem(workspace::SQPWorkspace, x, f, g, h)
+    fval, fgrad = f(x)
+    gval, gjac = g(x)
+    hval, hjac = h(x)
+
+    # compute approximiate lagrangian hessian
+    fterm = hessian(f)
+    gterm = transpose(gjac) * gjac
+    hterm = transpose(hjac) * hjac
+    W = fterm + lambda 
+end
+
+function approximiate_lagrangian_hessian(workspace::SQPWorkspace, x, f, g, h)
+    fval, fgrad = f(x)
+end
+
 mutable struct SubProblem
     n_dec::Int
     n_eq::Int
     n_ineq::Int
+    #P::Array{Float64, 2}
     A::Array{Float64, 2}
     l::Vector{Float64}
     u::Vector{Float64}
@@ -42,7 +102,7 @@ function SubProblem(n_dec::Int, n_eq::Int, n_ineq::Int)
     SubProblem(n_dec, n_eq, n_ineq, A, l, u)
 end
 
-function set_subproblem_constraint(problem::SubProblem, g, h, x)
+function set_subproblem_constraint!(problem::SubProblem, g, h, x)
     c_ineq, A_ineq = g(x)
     c_eq, A_eq = h(x)
 
@@ -82,7 +142,7 @@ function example()
         # 1/2 p^T W p + ∇ f^T p 
         # s.t. Ak * p + c = 0
 
-        set_subproblem_constraint(problem, inequality_constraint, equality_constraint, x)
+        set_subproblem_constraint!(problem, inequality_constraint, equality_constraint, x)
         P = SparseMatrixCSC(W)
         q = vec(df)
         Asp = SparseMatrixCSC(problem.A)
@@ -96,8 +156,8 @@ function example()
         mu = [results.y[2]] # dual for eq
     end
 
-    return x
+    return x, problem
 end
 
 using BenchmarkTools
-@benchmark x = example()
+x, problem = example()
