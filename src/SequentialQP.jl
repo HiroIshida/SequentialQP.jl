@@ -105,7 +105,7 @@ function optimize(x, lambda, mu, objective_function, inequality_constraint, equa
         mu = results.y[n_ineq+1:end] # dual for eq
         counter += 1
     end
-    return x, problem
+    return x
 end
 
 export lagrangian, hessian_finite_difference
