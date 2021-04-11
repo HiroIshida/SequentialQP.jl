@@ -29,8 +29,19 @@ function set_subproblem_constraint!(problem::SubProblem, c_ineq, c_eq, A_ineq, A
     problem.l[problem.n_ineq+1:end] = -c_eq
     problem.u[problem.n_ineq+1:end] = -c_eq
 
-    problem.A[1:problem.n_ineq, :] = transpose(A_ineq)
-    problem.A[problem.n_ineq+1:end, :] = transpose(A_eq)
+    problem.A[1:problem.n_ineq, :] = A_ineq
+    problem.A[problem.n_ineq+1:end, :] = A_eq
+end
+
+function compute_lag_grad(fgrad, gjac, hjac, lambda, mu)
+    lag_grad = fgrad
+    for i in 1:length(lambda)
+        @views lag_grad += lambda[i] * gjac[i, :]
+    end
+    for i in 1:length(mu)
+        @views lag_grad += mu[i] * hjac[i, :]
+    end
+    return lag_grad
 end
 
 function optimize(x, lambda, mu, objective_function, inequality_constraint, equality_constraint; ftol=1e-4)
@@ -56,11 +67,11 @@ function optimize(x, lambda, mu, objective_function, inequality_constraint, equa
         fval, fgrad = objective_function(x)
         gval, gjac = inequality_constraint(x)
         hval, hjac = equality_constraint(x)
-        lag_grad = fgrad .+ sum(broadcast(*, reshape(lambda, 1, :), gjac), dims=2) + sum(broadcast(*, reshape(mu, 1, :), hjac), dims=2)
+        lag_grad = compute_lag_grad(fgrad, gjac, hjac, lambda, mu)
 
         # damped BFGS update
         if counter > 0
-            lag_grad_pre = fgrad_pre .+ sum(broadcast(*, reshape(lambda, 1, :), gjac_pre), dims=2) + sum(broadcast(*, reshape(mu, 1, :), hjac_pre), dims=2)
+            lag_grad_pre = compute_lag_grad(fgrad_pre, gjac_pre, hjac_pre, lambda, mu)
             s = x - x_pre
             y = lag_grad - lag_grad_pre
             sWs = transpose(s) * W * s
@@ -90,8 +101,8 @@ function optimize(x, lambda, mu, objective_function, inequality_constraint, equa
         hjac_pre = hjac
 
         x += results.x # p in Wright's book
-        lambda = [results.y[1]] # dual for ineq
-        mu = [results.y[2]] # dual for eq
+        lambda = results.y[1:n_ineq] # dual for ineq
+        mu = results.y[n_ineq+1:end] # dual for eq
         counter += 1
     end
     return x, problem
